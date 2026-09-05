@@ -16,22 +16,22 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
 
-// ==========================================
-// MIDDLEWARE
-// ==========================================
+
 
 app.use(
   cors({
-    origin: "http://localhost:3000",
+    origin:
+      [
+        "http://localhost:3000",
+        "https://ticketnest-client.vercel.app"
+      ],
     credentials: true,
+  
   })
 );
 
 app.use(express.json());
 
-// ==========================================
-// MONGODB
-// ==========================================
 
 const uri = process.env.MONGODB_URI;
 
@@ -48,10 +48,7 @@ const client = new MongoClient(uri, {
   },
 });
 
-// ==========================================
-// TICKETNEST DATABASE
-// AUTH_DB_NAME=ticketnest_db
-// ==========================================
+
 
 const db = client.db("ticketnest_db");
 
@@ -63,9 +60,7 @@ const ticketsCollection = db.collection("tickets");
 const bookingsCollection = db.collection("bookings");
 const usersCollection = authDb.collection("user");
 
-// ==========================================
-// RUN SERVER
-// ==========================================
+
 
 async function run() {
   try {
@@ -90,10 +85,6 @@ async function run() {
       res.send("TicketNest Server is running!");
     });
 
-    // ==========================================
-    // GET ALL TICKETS
-    // Admin Manage Tickets
-    // ==========================================
 
     app.get("/api/tickets", async (req, res) => {
       try {
@@ -118,10 +109,7 @@ async function run() {
       }
     });
 
-    // ==========================================
-    // GET APPROVED TICKETS
-    // ==========================================
-
+ 
     app.get(
       "/api/tickets/approved",
       async (req, res) => {
@@ -187,11 +175,6 @@ async function run() {
       }
     );
 
-    // ==========================================
-    // GET ADVERTISED TICKETS
-    // Homepage
-    // Maximum 6
-    // ==========================================
 
     app.get(
       "/api/tickets/advertised",
