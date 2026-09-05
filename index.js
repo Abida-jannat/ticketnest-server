@@ -5,12 +5,20 @@ dns.setServers(["8.8.8.8", "8.8.4.4"]);
 import express from "express";
 import dotenv from "dotenv";
 import cors from "cors";
-import { MongoClient, ServerApiVersion, ObjectId } from "mongodb";
+import {
+  MongoClient,
+  ServerApiVersion,
+  ObjectId,
+} from "mongodb";
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
+
+// ==========================================
+// MIDDLEWARE
+// ==========================================
 
 app.use(
   cors({
@@ -20,6 +28,10 @@ app.use(
 );
 
 app.use(express.json());
+
+// ==========================================
+// MONGODB
+// ==========================================
 
 const uri = process.env.MONGODB_URI;
 
@@ -36,15 +48,24 @@ const client = new MongoClient(uri, {
   },
 });
 
+// ==========================================
+// TICKETNEST DATABASE
+// AUTH_DB_NAME=ticketnest_db
+// ==========================================
+
 const db = client.db("ticketnest_db");
 
-// Better Auth database
+// Better Auth also uses ticketnest_db
 const authDb = client.db(process.env.AUTH_DB_NAME);
 
 // Collections
 const ticketsCollection = db.collection("tickets");
 const bookingsCollection = db.collection("bookings");
 const usersCollection = authDb.collection("user");
+
+// ==========================================
+// RUN SERVER
+// ==========================================
 
 async function run() {
   try {
@@ -55,6 +76,11 @@ async function run() {
     });
 
     console.log("MongoDB connected successfully");
+    console.log("Ticket database: ticketnest_db");
+    console.log(
+      "Auth database:",
+      process.env.AUTH_DB_NAME
+    );
 
     // ==========================================
     // HOME
@@ -94,145 +120,153 @@ async function run() {
 
     // ==========================================
     // GET APPROVED TICKETS
-    // Used for All Tickets page
-    // Fraud vendor tickets are excluded
     // ==========================================
 
-    app.get("/api/tickets/approved", async (req, res) => {
-      try {
-        const tickets = await ticketsCollection
-          .aggregate([
-            {
-              $match: {
-                verificationStatus: "approved",
+    app.get(
+      "/api/tickets/approved",
+      async (req, res) => {
+        try {
+          const tickets = await ticketsCollection
+            .aggregate([
+              {
+                $match: {
+                  verificationStatus: "approved",
+                },
               },
-            },
-            {
-              $lookup: {
-                from: "user",
-                localField: "vendorEmail",
-                foreignField: "email",
-                as: "vendor",
-              },
-            },
-            {
-              $match: {
-                $or: [
-                  {
-                    vendor: {
-                      $size: 0,
-                    },
-                  },
-                  {
-                    "vendor.isFraud": {
-                      $ne: true,
-                    },
-                  },
-                ],
-              },
-            },
-            {
-              $sort: {
-                createdAt: -1,
-              },
-            },
-          ])
-          .toArray();
 
-        res.json({
-          success: true,
-          tickets,
-        });
-      } catch (error) {
-        console.error(
-          "Fetch approved tickets error:",
-          error
-        );
+              {
+                $lookup: {
+                  from: "user",
+                  localField: "vendorEmail",
+                  foreignField: "email",
+                  as: "vendor",
+                },
+              },
 
-        res.status(500).json({
-          success: false,
-          message: "Failed to fetch approved tickets.",
-        });
+              {
+                $match: {
+                  $or: [
+                    {
+                      vendor: {
+                        $size: 0,
+                      },
+                    },
+                    {
+                      "vendor.isFraud": {
+                        $ne: true,
+                      },
+                    },
+                  ],
+                },
+              },
+
+              {
+                $sort: {
+                  createdAt: -1,
+                },
+              },
+            ])
+            .toArray();
+
+          res.json({
+            success: true,
+            tickets,
+          });
+        } catch (error) {
+          console.error(
+            "Fetch approved tickets error:",
+            error
+          );
+
+          res.status(500).json({
+            success: false,
+            message:
+              "Failed to fetch approved tickets.",
+          });
+        }
       }
-    });
+    );
 
     // ==========================================
     // GET ADVERTISED TICKETS
-    // Homepage Advertisement Section
+    // Homepage
+    // Maximum 6
     // ==========================================
 
-    app.get("/api/tickets/advertised", async (req, res) => {
-      try {
-        const tickets = await ticketsCollection
-          .aggregate([
-            {
-              $match: {
-                verificationStatus: "approved",
-                isAdvertised: true,
-              },
-            },
-
-            // Find ticket vendor
-            {
-              $lookup: {
-                from: "user",
-                localField: "vendorEmail",
-                foreignField: "email",
-                as: "vendor",
-              },
-            },
-
-            // Hide fraudulent vendor tickets
-            {
-              $match: {
-                $or: [
-                  {
-                    vendor: {
-                      $size: 0,
-                    },
+    app.get(
+      "/api/tickets/advertised",
+      async (req, res) => {
+        try {
+          const tickets =
+            await ticketsCollection
+              .aggregate([
+                {
+                  $match: {
+                    verificationStatus: "approved",
+                    isAdvertised: true,
                   },
-                  {
-                    "vendor.isFraud": {
-                      $ne: true,
-                    },
+                },
+
+                {
+                  $lookup: {
+                    from: "user",
+                    localField: "vendorEmail",
+                    foreignField: "email",
+                    as: "vendor",
                   },
-                ],
-              },
-            },
+                },
 
-            // Newest advertised tickets first
-            {
-              $sort: {
-                createdAt: -1,
-              },
-            },
+                {
+                  $match: {
+                    $or: [
+                      {
+                        vendor: {
+                          $size: 0,
+                        },
+                      },
+                      {
+                        "vendor.isFraud": {
+                          $ne: true,
+                        },
+                      },
+                    ],
+                  },
+                },
 
-            // Safety limit
-            {
-              $limit: 6,
-            },
-          ])
-          .toArray();
+                {
+                  $sort: {
+                    createdAt: -1,
+                  },
+                },
 
-        res.json({
-          success: true,
-          tickets,
-        });
-      } catch (error) {
-        console.error(
-          "Fetch advertised tickets error:",
-          error
-        );
+                {
+                  $limit: 6,
+                },
+              ])
+              .toArray();
 
-        res.status(500).json({
-          success: false,
-          message: "Failed to fetch advertised tickets.",
-        });
+          res.json({
+            success: true,
+            tickets,
+          });
+        } catch (error) {
+          console.error(
+            "Fetch advertised tickets error:",
+            error
+          );
+
+          res.status(500).json({
+            success: false,
+            message:
+              "Failed to fetch advertised tickets.",
+          });
+        }
       }
-    });
+    );
 
     // ==========================================
     // ADD NEW TICKET
+    // Vendor
     // ==========================================
 
     app.post("/api/tickets", async (req, res) => {
@@ -265,31 +299,54 @@ async function run() {
         ) {
           return res.status(400).json({
             success: false,
-            message: "Please provide all required fields.",
+            message:
+              "Please provide all required fields.",
           });
         }
 
-        // Check vendor
-        const vendor = await usersCollection.findOne({
-          email: vendorEmail.trim(),
-        });
+        const cleanVendorEmail =
+          vendorEmail.trim();
+
+        // Find vendor
+        const vendor =
+          await usersCollection.findOne({
+            email: cleanVendorEmail,
+          });
+
+        console.log(
+          "Searching vendor:",
+          cleanVendorEmail
+        );
 
         if (!vendor) {
+          console.log(
+            "Vendor not found in ticketnest_db.user:",
+            cleanVendorEmail
+          );
+
           return res.status(404).json({
             success: false,
             message: "Vendor account not found.",
           });
         }
 
+        console.log("Vendor found:", {
+          email: vendor.email,
+          name: vendor.name,
+          role: vendor.role,
+          isFraud: vendor.isFraud,
+        });
+
         // Only vendor can add tickets
         if (vendor.role !== "vendor") {
           return res.status(403).json({
             success: false,
-            message: "Only vendors can add tickets.",
+            message:
+              "Only vendors can add tickets.",
           });
         }
 
-        // Fraud vendor cannot add tickets
+        // Fraud vendor cannot add
         if (vendor.isFraud === true) {
           return res.status(403).json({
             success: false,
@@ -302,7 +359,8 @@ async function run() {
         if (Number(price) <= 0) {
           return res.status(400).json({
             success: false,
-            message: "Price must be greater than 0.",
+            message:
+              "Price must be greater than 0.",
           });
         }
 
@@ -315,15 +373,31 @@ async function run() {
           });
         }
 
-        // Validate date
-        const departureDate = new Date(
-          departureDateTime
-        );
+        // Validate departure date
+        const departureDate =
+          new Date(departureDateTime);
 
-        if (Number.isNaN(departureDate.getTime())) {
+        if (
+          Number.isNaN(
+            departureDate.getTime()
+          )
+        ) {
           return res.status(400).json({
             success: false,
-            message: "Invalid departure date.",
+            message:
+              "Invalid departure date.",
+          });
+        }
+
+        // Departure must be future
+        if (
+          departureDate.getTime() <=
+          Date.now()
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Departure date must be in the future.",
           });
         }
 
@@ -331,23 +405,33 @@ async function run() {
           title: title.trim(),
           from: from.trim(),
           to: to.trim(),
-          transportType: transportType.trim(),
+
+          transportType:
+            transportType.trim(),
 
           price: Number(price),
           quantity: Number(quantity),
 
-          departureDateTime: departureDate,
+          departureDateTime:
+            departureDate,
 
-          perks: Array.isArray(perks) ? perks : [],
+          perks: Array.isArray(perks)
+            ? perks
+            : [],
 
           image: image || "",
 
-          vendorName: vendorName.trim(),
-          vendorEmail: vendorEmail.trim(),
+          vendorName:
+            vendor.name ||
+            vendorName.trim(),
 
-          verificationStatus: "pending",
+          vendorEmail:
+            vendor.email ||
+            cleanVendorEmail,
 
-          // Advertisement starts OFF
+          verificationStatus:
+            "pending",
+
           isAdvertised: false,
 
           createdAt: new Date(),
@@ -361,15 +445,21 @@ async function run() {
 
         res.status(201).json({
           success: true,
-          message: "Ticket added successfully.",
-          ticketId: result.insertedId,
+          message:
+            "Ticket added successfully.",
+          ticketId:
+            result.insertedId,
         });
       } catch (error) {
-        console.error("Add ticket error:", error);
+        console.error(
+          "Add ticket error:",
+          error
+        );
 
         res.status(500).json({
           success: false,
-          message: "Failed to add ticket.",
+          message:
+            "Failed to add ticket.",
         });
       }
     });
@@ -382,19 +472,22 @@ async function run() {
       "/api/tickets/vendor",
       async (req, res) => {
         try {
-          const { vendorEmail } = req.query;
+          const { vendorEmail } =
+            req.query;
 
           if (!vendorEmail) {
             return res.status(400).json({
               success: false,
-              message: "Vendor email is required.",
+              message:
+                "Vendor email is required.",
             });
           }
 
           const tickets =
             await ticketsCollection
               .find({
-                vendorEmail: vendorEmail.trim(),
+                vendorEmail:
+                  vendorEmail.trim(),
               })
               .sort({
                 createdAt: -1,
@@ -446,16 +539,21 @@ async function run() {
           if (!ObjectId.isValid(id)) {
             return res.status(400).json({
               success: false,
-              message: "Invalid ticket ID.",
+              message:
+                "Invalid ticket ID.",
             });
           }
 
           if (!vendorEmail) {
             return res.status(400).json({
               success: false,
-              message: "Vendor email is required.",
+              message:
+                "Vendor email is required.",
             });
           }
+
+          const cleanVendorEmail =
+            vendorEmail.trim();
 
           const ticket =
             await ticketsCollection.findOne({
@@ -469,10 +567,9 @@ async function run() {
             });
           }
 
-          // Ownership check
           if (
             ticket.vendorEmail !==
-            vendorEmail.trim()
+            cleanVendorEmail
           ) {
             return res.status(403).json({
               success: false,
@@ -481,7 +578,6 @@ async function run() {
             });
           }
 
-          // Rejected tickets cannot be edited
           if (
             ticket.verificationStatus ===
             "rejected"
@@ -493,13 +589,28 @@ async function run() {
             });
           }
 
-          // Check vendor fraud
           const vendor =
             await usersCollection.findOne({
-              email: vendorEmail.trim(),
+              email: cleanVendorEmail,
             });
 
-          if (vendor?.isFraud === true) {
+          if (!vendor) {
+            return res.status(404).json({
+              success: false,
+              message:
+                "Vendor account not found.",
+            });
+          }
+
+          if (vendor.role !== "vendor") {
+            return res.status(403).json({
+              success: false,
+              message:
+                "Only vendors can edit tickets.",
+            });
+          }
+
+          if (vendor.isFraud === true) {
             return res.status(403).json({
               success: false,
               message:
@@ -507,9 +618,8 @@ async function run() {
             });
           }
 
-          const departureDate = new Date(
-            departureDateTime
-          );
+          const departureDate =
+            new Date(departureDateTime);
 
           if (
             Number.isNaN(
@@ -520,6 +630,17 @@ async function run() {
               success: false,
               message:
                 "Invalid departure date.",
+            });
+          }
+
+          if (
+            departureDate.getTime() <=
+            Date.now()
+          ) {
+            return res.status(400).json({
+              success: false,
+              message:
+                "Departure date must be in the future.",
             });
           }
 
@@ -543,6 +664,7 @@ async function run() {
             title: title.trim(),
             from: from.trim(),
             to: to.trim(),
+
             transportType:
               transportType.trim(),
 
@@ -600,13 +722,16 @@ async function run() {
       async (req, res) => {
         try {
           const { id } = req.params;
-          const { verificationStatus } =
-            req.body;
+
+          const {
+            verificationStatus,
+          } = req.body;
 
           if (!ObjectId.isValid(id)) {
             return res.status(400).json({
               success: false,
-              message: "Invalid ticket ID.",
+              message:
+                "Invalid ticket ID.",
             });
           }
 
@@ -636,40 +761,32 @@ async function run() {
           if (!ticket) {
             return res.status(404).json({
               success: false,
-              message: "Ticket not found.",
+              message:
+                "Ticket not found.",
             });
           }
 
-          // If ticket is rejected, remove advertisement
+          const updateData = {
+            verificationStatus,
+            updatedAt: new Date(),
+          };
+
           if (
             verificationStatus ===
             "rejected"
           ) {
-            await ticketsCollection.updateOne(
-              {
-                _id: new ObjectId(id),
-              },
-              {
-                $set: {
-                  verificationStatus,
-                  isAdvertised: false,
-                  updatedAt: new Date(),
-                },
-              }
-            );
-          } else {
-            await ticketsCollection.updateOne(
-              {
-                _id: new ObjectId(id),
-              },
-              {
-                $set: {
-                  verificationStatus,
-                  updatedAt: new Date(),
-                },
-              }
-            );
+            updateData.isAdvertised =
+              false;
           }
+
+          await ticketsCollection.updateOne(
+            {
+              _id: new ObjectId(id),
+            },
+            {
+              $set: updateData,
+            }
+          );
 
           res.json({
             success: true,
@@ -692,7 +809,7 @@ async function run() {
     );
 
     // ==========================================
-    // ADVERTISE / UNADVERTISE TICKET
+    // ADVERTISE / UNADVERTISE
     // ==========================================
 
     app.patch(
@@ -700,18 +817,19 @@ async function run() {
       async (req, res) => {
         try {
           const { id } = req.params;
-          const { isAdvertised } =
-            req.body;
 
-          // Validate ID
+          const {
+            isAdvertised,
+          } = req.body;
+
           if (!ObjectId.isValid(id)) {
             return res.status(400).json({
               success: false,
-              message: "Invalid ticket ID.",
+              message:
+                "Invalid ticket ID.",
             });
           }
 
-          // Validate boolean
           if (
             typeof isAdvertised !==
             "boolean"
@@ -723,7 +841,6 @@ async function run() {
             });
           }
 
-          // Find ticket
           const ticket =
             await ticketsCollection.findOne({
               _id: new ObjectId(id),
@@ -732,12 +849,11 @@ async function run() {
           if (!ticket) {
             return res.status(404).json({
               success: false,
-              message: "Ticket not found.",
+              message:
+                "Ticket not found.",
             });
           }
 
-          // Only approved tickets
-          // can be advertised
           if (
             ticket.verificationStatus !==
             "approved"
@@ -749,12 +865,20 @@ async function run() {
             });
           }
 
-          // ======================================
-          // ADVERTISE
-          // ======================================
+          const vendor =
+            await usersCollection.findOne({
+              email: ticket.vendorEmail,
+            });
+
+          if (vendor?.isFraud === true) {
+            return res.status(403).json({
+              success: false,
+              message:
+                "Tickets from fraudulent vendors cannot be advertised.",
+            });
+          }
 
           if (isAdvertised) {
-            // Count currently advertised tickets
             const advertisedCount =
               await ticketsCollection.countDocuments(
                 {
@@ -764,7 +888,6 @@ async function run() {
                 }
               );
 
-            // Maximum 6 tickets
             if (
               advertisedCount >= 6 &&
               ticket.isAdvertised !== true
@@ -776,10 +899,6 @@ async function run() {
               });
             }
           }
-
-          // ======================================
-          // UPDATE
-          // ======================================
 
           const result =
             await ticketsCollection.updateOne(
@@ -836,13 +955,16 @@ async function run() {
       async (req, res) => {
         try {
           const { id } = req.params;
-          const { vendorEmail } =
-            req.body;
+
+          const {
+            vendorEmail,
+          } = req.body;
 
           if (!ObjectId.isValid(id)) {
             return res.status(400).json({
               success: false,
-              message: "Invalid ticket ID.",
+              message:
+                "Invalid ticket ID.",
             });
           }
 
@@ -854,6 +976,9 @@ async function run() {
             });
           }
 
+          const cleanVendorEmail =
+            vendorEmail.trim();
+
           const ticket =
             await ticketsCollection.findOne({
               _id: new ObjectId(id),
@@ -862,14 +987,14 @@ async function run() {
           if (!ticket) {
             return res.status(404).json({
               success: false,
-              message: "Ticket not found.",
+              message:
+                "Ticket not found.",
             });
           }
 
-          // Ownership check
           if (
             ticket.vendorEmail !==
-            vendorEmail.trim()
+            cleanVendorEmail
           ) {
             return res.status(403).json({
               success: false,
@@ -878,7 +1003,6 @@ async function run() {
             });
           }
 
-          // Rejected tickets cannot be deleted
           if (
             ticket.verificationStatus ===
             "rejected"
@@ -890,13 +1014,28 @@ async function run() {
             });
           }
 
-          // Fraud vendor cannot delete
           const vendor =
             await usersCollection.findOne({
-              email: vendorEmail.trim(),
+              email: cleanVendorEmail,
             });
 
-          if (vendor?.isFraud === true) {
+          if (!vendor) {
+            return res.status(404).json({
+              success: false,
+              message:
+                "Vendor account not found.",
+            });
+          }
+
+          if (vendor.role !== "vendor") {
+            return res.status(403).json({
+              success: false,
+              message:
+                "Only vendors can delete tickets.",
+            });
+          }
+
+          if (vendor.isFraud === true) {
             return res.status(403).json({
               success: false,
               message:
@@ -927,7 +1066,11 @@ async function run() {
         }
       }
     );
+
+    // ==========================================
     // CREATE BOOKING
+    // User
+    // ==========================================
 
     app.post(
       "/api/bookings",
@@ -953,7 +1096,9 @@ async function run() {
             });
           }
 
-          if (!ObjectId.isValid(ticketId)) {
+          if (
+            !ObjectId.isValid(ticketId)
+          ) {
             return res.status(400).json({
               success: false,
               message:
@@ -964,11 +1109,16 @@ async function run() {
           const bookingQuantity =
             Number(quantity);
 
-          if (bookingQuantity <= 0) {
+          if (
+            !Number.isInteger(
+              bookingQuantity
+            ) ||
+            bookingQuantity <= 0
+          ) {
             return res.status(400).json({
               success: false,
               message:
-                "Booking quantity must be greater than 0.",
+                "Booking quantity must be a positive whole number.",
             });
           }
 
@@ -980,11 +1130,11 @@ async function run() {
           if (!ticket) {
             return res.status(404).json({
               success: false,
-              message: "Ticket not found.",
+              message:
+                "Ticket not found.",
             });
           }
 
-          // Only approved tickets
           if (
             ticket.verificationStatus !==
             "approved"
@@ -996,7 +1146,6 @@ async function run() {
             });
           }
 
-          // Check vendor fraud
           const vendor =
             await usersCollection.findOne({
               email: ticket.vendorEmail,
@@ -1010,7 +1159,34 @@ async function run() {
             });
           }
 
-          // Check quantity
+          const departureDate =
+            new Date(
+              ticket.departureDateTime
+            );
+
+          if (
+            Number.isNaN(
+              departureDate.getTime()
+            )
+          ) {
+            return res.status(400).json({
+              success: false,
+              message:
+                "Invalid ticket departure date.",
+            });
+          }
+
+          if (
+            departureDate.getTime() <=
+            Date.now()
+          ) {
+            return res.status(400).json({
+              success: false,
+              message:
+                "This ticket has already departed.",
+            });
+          }
+
           if (
             ticket.quantity <
             bookingQuantity
@@ -1022,15 +1198,41 @@ async function run() {
             });
           }
 
+          const unitPrice =
+            Number(ticket.price);
+
           const totalPrice =
-            Number(ticket.price) *
+            unitPrice *
             bookingQuantity;
 
           const booking = {
             ticketId:
               new ObjectId(ticketId),
 
-            ticketTitle: ticket.title,
+            ticketTitle:
+              ticket.title,
+
+            image:
+              ticket.image || "",
+
+            from:
+              ticket.from,
+
+            to:
+              ticket.to,
+
+            transportType:
+              ticket.transportType || "",
+
+            unitPrice,
+
+            quantity:
+              bookingQuantity,
+
+            totalPrice,
+
+            departureDateTime:
+              departureDate,
 
             vendorName:
               ticket.vendorName,
@@ -1044,15 +1246,17 @@ async function run() {
             userEmail:
               userEmail.trim(),
 
-            quantity:
-              bookingQuantity,
+            status:
+              "pending",
 
-            totalPrice,
+            paymentStatus:
+              "unpaid",
 
-            status: "pending",
+            createdAt:
+              new Date(),
 
-            createdAt: new Date(),
-            updatedAt: new Date(),
+            updatedAt:
+              new Date(),
           };
 
           const result =
@@ -1077,6 +1281,55 @@ async function run() {
             success: false,
             message:
               "Failed to create booking.",
+          });
+        }
+      }
+    );
+
+    // ==========================================
+    // GET USER BOOKINGS
+    // ==========================================
+
+    app.get(
+      "/api/bookings/user",
+      async (req, res) => {
+        try {
+          const { userEmail } =
+            req.query;
+
+          if (!userEmail) {
+            return res.status(400).json({
+              success: false,
+              message:
+                "User email is required.",
+            });
+          }
+
+          const bookings =
+            await bookingsCollection
+              .find({
+                userEmail:
+                  userEmail.trim(),
+              })
+              .sort({
+                createdAt: -1,
+              })
+              .toArray();
+
+          res.json({
+            success: true,
+            bookings,
+          });
+        } catch (error) {
+          console.error(
+            "Fetch user bookings error:",
+            error
+          );
+
+          res.status(500).json({
+            success: false,
+            message:
+              "Failed to fetch user bookings.",
           });
         }
       }
@@ -1131,14 +1384,20 @@ async function run() {
       }
     );
 
+    // ==========================================
     // ACCEPT / REJECT BOOKING
+    // Vendor
+    // ==========================================
 
     app.patch(
       "/api/bookings/:id/status",
       async (req, res) => {
         try {
-          const { id } = req.params;
-          const { status } = req.body;
+          const { id } =
+            req.params;
+
+          const { status } =
+            req.body;
 
           if (!ObjectId.isValid(id)) {
             return res.status(400).json({
@@ -1149,9 +1408,10 @@ async function run() {
           }
 
           if (
-            !["accepted", "rejected"].includes(
-              status
-            )
+            ![
+              "accepted",
+              "rejected",
+            ].includes(status)
           ) {
             return res.status(400).json({
               success: false,
@@ -1174,7 +1434,8 @@ async function run() {
           }
 
           if (
-            booking.status !== "pending"
+            booking.status !==
+            "pending"
           ) {
             return res.status(400).json({
               success: false,
@@ -1183,14 +1444,21 @@ async function run() {
             });
           }
 
-          // Check vendor fraud
           const vendor =
             await usersCollection.findOne({
               email:
                 booking.vendorEmail,
             });
 
-          if (vendor?.isFraud === true) {
+          if (!vendor) {
+            return res.status(404).json({
+              success: false,
+              message:
+                "Vendor account not found.",
+            });
+          }
+
+          if (vendor.isFraud === true) {
             return res.status(403).json({
               success: false,
               message:
@@ -1198,7 +1466,6 @@ async function run() {
             });
           }
 
-          // If accepting, decrease quantity
           if (status === "accepted") {
             const ticket =
               await ticketsCollection.findOne({
@@ -1214,6 +1481,20 @@ async function run() {
             }
 
             if (
+              ticket.departureDateTime &&
+              new Date(
+                ticket.departureDateTime
+              ).getTime() <=
+                Date.now()
+            ) {
+              return res.status(400).json({
+                success: false,
+                message:
+                  "This ticket has already departed.",
+              });
+            }
+
+            if (
               ticket.quantity <
               booking.quantity
             ) {
@@ -1224,23 +1505,8 @@ async function run() {
               });
             }
 
-            await ticketsCollection.updateOne(
-              {
-                _id: booking.ticketId,
-                quantity: {
-                  $gte: booking.quantity,
-                },
-              },
-              {
-                $inc: {
-                  quantity:
-                    -booking.quantity,
-                },
-                $set: {
-                  updatedAt: new Date(),
-                },
-              }
-            );
+            // Quantity is NOT reduced here.
+            // It will be reduced after payment.
           }
 
           await bookingsCollection.updateOne(
@@ -1250,7 +1516,8 @@ async function run() {
             {
               $set: {
                 status,
-                updatedAt: new Date(),
+                updatedAt:
+                  new Date(),
               },
             }
           );
@@ -1277,45 +1544,56 @@ async function run() {
       }
     );
 
+    // ==========================================
     // GET ALL USERS
     // Admin Manage Users
- 
-    app.get("/api/users", async (req, res) => {
-      try {
-        const users =
-          await usersCollection
-            .find({})
-            .sort({
-              createdAt: -1,
-            })
-            .toArray();
+    // ==========================================
 
-        res.json({
-          success: true,
-          users,
-        });
-      } catch (error) {
-        console.error(
-          "Fetch users error:",
-          error
-        );
+    app.get(
+      "/api/users",
+      async (req, res) => {
+        try {
+          const users =
+            await usersCollection
+              .find({})
+              .sort({
+                createdAt: -1,
+              })
+              .toArray();
 
-        res.status(500).json({
-          success: false,
-          message:
-            "Failed to fetch users.",
-        });
+          res.json({
+            success: true,
+            users,
+          });
+        } catch (error) {
+          console.error(
+            "Fetch users error:",
+            error
+          );
+
+          res.status(500).json({
+            success: false,
+            message:
+              "Failed to fetch users.",
+          });
+        }
       }
-    });
+    );
 
+    // ==========================================
     // CHANGE USER ROLE
- 
+    // Admin
+    // ==========================================
+
     app.patch(
       "/api/users/:id/role",
       async (req, res) => {
         try {
-          const { id } = req.params;
-          const { role } = req.body;
+          const { id } =
+            req.params;
+
+          const { role } =
+            req.body;
 
           if (!ObjectId.isValid(id)) {
             return res.status(400).json({
@@ -1326,9 +1604,11 @@ async function run() {
           }
 
           if (
-            !["user", "admin", "vendor"].includes(
-              role
-            )
+            ![
+              "user",
+              "admin",
+              "vendor",
+            ].includes(role)
           ) {
             return res.status(400).json({
               success: false,
@@ -1357,7 +1637,8 @@ async function run() {
             {
               $set: {
                 role,
-                updatedAt: new Date(),
+                updatedAt:
+                  new Date(),
               },
             }
           );
@@ -1382,14 +1663,20 @@ async function run() {
       }
     );
 
+    // ==========================================
     // MARK VENDOR AS FRAUD
+    // Admin
+    // ==========================================
 
     app.patch(
       "/api/users/:id/fraud",
       async (req, res) => {
         try {
-          const { id } = req.params;
-          const { isFraud } = req.body;
+          const { id } =
+            req.params;
+
+          const { isFraud } =
+            req.body;
 
           if (!ObjectId.isValid(id)) {
             return res.status(400).json({
@@ -1400,7 +1687,8 @@ async function run() {
           }
 
           if (
-            typeof isFraud !== "boolean"
+            typeof isFraud !==
+            "boolean"
           ) {
             return res.status(400).json({
               success: false,
@@ -1422,8 +1710,10 @@ async function run() {
             });
           }
 
-          // Only vendor can be marked fraud
-          if (user.role !== "vendor") {
+          if (
+            user.role !==
+            "vendor"
+          ) {
             return res.status(400).json({
               success: false,
               message:
@@ -1438,22 +1728,24 @@ async function run() {
             {
               $set: {
                 isFraud,
-                updatedAt: new Date(),
+                updatedAt:
+                  new Date(),
               },
             }
           );
 
-          // If vendor becomes fraud,
-          // automatically remove advertisement
           if (isFraud === true) {
             await ticketsCollection.updateMany(
               {
-                vendorEmail: user.email,
+                vendorEmail:
+                  user.email,
               },
               {
                 $set: {
-                  isAdvertised: false,
-                  updatedAt: new Date(),
+                  isAdvertised:
+                    false,
+                  updatedAt:
+                    new Date(),
                 },
               }
             );
@@ -1478,10 +1770,13 @@ async function run() {
           });
         }
       }
-    ); 
+    );
+
+    // ==========================================
     // DEBUG USERS
-    // Temporary route
-  
+    // Temporary
+    // ==========================================
+
     app.get(
       "/api/debug-users",
       async (req, res) => {
@@ -1494,7 +1789,7 @@ async function run() {
           const users =
             await usersCollection
               .find({})
-              .limit(10)
+              .limit(20)
               .toArray();
 
           res.json({
@@ -1507,7 +1802,8 @@ async function run() {
                   collection.name
               ),
 
-            userCount: users.length,
+            userCount:
+              users.length,
 
             users,
           });
@@ -1519,13 +1815,16 @@ async function run() {
 
           res.status(500).json({
             success: false,
-            message: error.message,
+            message:
+              error.message,
           });
         }
       }
     );
 
-   
+    // ==========================================
+    // START SERVER
+    // ==========================================
 
     app.listen(port, () => {
       console.log(
